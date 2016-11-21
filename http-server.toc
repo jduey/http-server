@@ -1,0 +1,124 @@
+
+(add-ns sys (git-dependency "github.com:jduey/system.git" "system.toc"))
+(add-ns tcp (git-dependency "github.com:jduey/tcp.git" "tcp.toc"))
+(add-ns http (git-dependency "github.com:jduey/http.git" "http.toc"))
+(add-ns fr (git-dependency "github.com:jduey/free.git" "free.toc"))
+(add-ns rd (git-dependency "github.com:jduey/recursive-descent.git" "recursive-descent.toc"))
+(add-ns fio (git-dependency "github.com:jduey/file-io.git" "file-io.toc"))
+
+(add-ns h (module "html/html.toc"))
+
+(defprotocol StringWriter
+  (send [value socket]
+    (tcp/write socket (str value))))
+
+(extend-type List
+  StringWriter
+  (send [str-list socket]
+    (map str-list (fn [str]
+                    (send str socket)))))
+
+(extend-type h/EmptyHTMLElement
+  StringWriter
+  (send [el socket]
+    (send (list "<" (.tag el) " "
+                (interpose (map (.attrs el)
+                                (fn [[k v]] (str k "=" v)))
+                           " ")
+                "/>")
+                socket)))
+
+(extend-type h/HTMLElement
+  StringWriter
+  (send [el socket]
+    (send (list "<" (.tag el) " "
+                (interpose (map (.attrs el) (fn [[k v]] (str k "=" v)))
+                           " ")
+                ">")
+          socket)
+    (map (.elements el) (fn [element]
+                          (send element socket)))
+    (send (list "</" (.tag el) ">") socket)))
+
+(defn http-response
+  ([code message]
+   (list "HTTP/1.1 " (str code) " " message "\n"))
+  ([code message body]
+   (list "HTTP/1.1 " (str code) " " message "\n\n" body)))
+
+(def not-found-404
+  (sm/state-maybe (http-response 404 "Resource not found"
+                                 (h/html
+                                  (h/body
+                                   (h/h1 "404: Resource not found"))))))
+
+(defn directory-page [path]
+  (let [path-str (apply str (interpose path "/"))]
+    (for [link-prefix (or (= "" path-str)
+                          (maybe (str "/" path-str)))
+          parent (or (= "" path-str)
+                     (maybe (list (h/a {"href" (apply str "/" (interpose (butlast path) "/"))}
+                                       "Parent Directory")
+                                  (h/br))))
+          path-str (or (and (= "" path-str) (maybe "."))
+                       (maybe path-str))
+          dir-entries (sys/list-files path-str)
+          :let [links (cons parent (flat-map dir-entries
+                                             (fn [entry]
+                                               (list (h/a {"href" (str link-prefix "/" (.name entry))}
+                                                          (.name entry))
+                                                     (h/br)))))]]
+      (h/html
+       (h/head (h/title (str "Index of " path-str)))
+       (h/body (h/h1 (str "Index of " path-str))
+               (apply h/pre links))))))
+
+(def router
+  (comp (for [req (fr/evaluate http/request-message rd/recursive-descent)
+              resp (sm/when (for [path (:path req)
+                                  resp (or (directory-page path)
+                                           (map (fio/file-in (apply str (interpose path "/")))
+                                                (fn [_]
+                                                  (slurp (apply str (interpose path "/"))))))]
+                              resp))]
+          (http-response 200 'OK resp))
+        not-found-404))
+
+(defn handle-request [socket]
+  (for [[response _] (router {:input (cache socket)})]
+    (send response socket)))
+
+(defn daemon [server]
+  (fn []
+    (extract server)
+    (future (daemon server))))
+
+(main [_]
+      ;; (println (sys/list-files "http-server.dSYM/Contents/Resources"))
+      (or (map (tcp/listen 8080)
+               (fn [connection-stream]
+                 (let [server (map connection-stream handle-request)]
+                   (println "Waiting for request")
+                   (maybe (future (daemon server))))))
+          (println (sys/error-string)))
+      )
+
+
+;; hello world
+;; add tcp.toc, explain dependency/module system
+;; print listening socket
+;; explain map, stream, ServerSocket
+;; handle one request, print :got-a-connections socket
+;; build response maker
+;; create 404 page
+;; bring in http grammar
+;; build http parser for generic request
+;; explain grammar combinators
+;; show EBNF
+;; bring in URI grammar
+;; bring in recursive-descent
+;; explain 'cache'
+;; daemonize the process
+;; build file system explorer
+;; show custom route parsers
+;; handle simple XML body's

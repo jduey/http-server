@@ -1,0 +1,40 @@
+
+(defprotocol HTMLProto
+  (write [_ socket]))
+
+(deftype EmptyHTMLElement [tag attrs])
+
+(deftype HTMLElement [tag attrs elements]
+  Stringable
+  (string-list [_]
+    (comp (list (str tag) "\n")
+          (interpose (flat-map elements string-list) "\n"))))
+
+(defprotocol HTMLTag
+  (make-element [element tag]
+    (HTMLElement tag empty-list (list element)))
+  (make-element [element tag elements]
+    (HTMLElement tag empty-list (cons element elements))))
+
+(extend-type HashMap
+  HTMLTag
+  (make-element [attrs tag] (EmptyHTMLElement tag (seq attrs)))
+  (make-element [attrs tag elements] (HTMLElement tag (seq attrs) elements)))
+
+(defn tag [tag]
+  (fn
+    ([] (EmptyHTMLElement tag empty-list))
+    ([attrs-or-element] (make-element attrs-or-element tag))
+    ([attrs-or-element & elements] (make-element attrs-or-element tag elements))))
+
+(def html (tag 'html))
+(def body (tag 'body))
+(def h1 (tag 'h1))
+(def h2 (tag 'h2))
+(def h3 (tag 'h3))
+(def h4 (tag 'h4))
+(def pre (tag 'pre))
+(def a (tag 'a))
+(def br (tag 'br))
+(def head (tag 'head))
+(def title (tag 'title))
